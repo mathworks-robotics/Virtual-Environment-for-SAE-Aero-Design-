@@ -1,0 +1,149 @@
+SAE Aero Design Repository Review
+Project: sae-aero-design-simulation
+Date: 2026-06-10
+
+Method
+- Reviewed Overview.mlx first, as requested.
+- Attempted MATLAB/Simulink MCP access through detect_matlab_toolboxes and model_overview.
+- Both MCP calls failed with "failed to attach to MATLAB session".
+- Findings below are therefore based on static inspection of Overview.mlx, the setup live scripts, MATLAB source files, and the checked-in SLX/XML contents.
+
+VERDICT: Blocked - fundamental issues
+
+CRITICAL ISSUES (must fix before students use this):
+1. Dynamic pressure uses inertial speed while alpha, beta, and TAS use air-relative speed - In Simulation/SimulationDemo.slx -> simulink/systems/system_1153.xml, Dynamic Pressure is driven by <Ve>, while the Incidence, Sideslip, and Airspeed block is driven by Vb = body velocity - uvw_wind. Why it matters: every wind-on case teaches the wrong qbar, forces, moments, and control authority. Fix: rewire qbar to the same air-relative velocity used for alpha, beta, and TAS, then add a regression case with steady crosswind and gust.
+2. Environment presets are not faithfully connected to the active model - Core/environment/environmentLibrary.m:43 says env.Atmosphere is display/logging only; Core/initialization/Initialization.m:78-80 hardcodes latitude, longitude, and altitude to zero; the active COESA block in Simulation/SimulationDemo.slx -> simulink/systems/system_1209.xml is fixed to a "High temperature" profile at 5 km; the Dryden block in system_1228.xml uses geometry.Area as wingspan and hardcoded turbulence/gust toggles. Why it matters: students think they are testing Lakeland, Van Nuys, or Denver, but the plant is not actually using those conditions consistently. Fix: make the model consume preset site, atmosphere, turbulence, and gust parameters end to end, and remove hardcoded block parameters.
+3. Propulsion/control mapping contains silent nonphysical scaling and a direct rudder bug - In Simulation/SimulationDemo.slx -> simulink/systems/system_1168.xml, thrust is lookup based, multiplied by rho/1.225, and then multiplied again by Gain = 2. In system_2006.xml:97-104, rudder scaling uses elevatorMax and abs(elevatorMin) instead of rudder limits. Why it matters: takeoff, climb, and yaw-control conclusions can look clean while being wrong by construction. Fix: remove or explicitly justify the thrust scaling with measured motor-prop data, and correct rudder scaling to use rudder limits with a calibration regression test.
+4. The checked-in architecture is internally inconsistent - The active model is SimulationDemo.slx, but comments and scripts still direct students to SimulationChallenge.slx, initialSetup1.m, runFullSetup, analyzePerformance.m, and analyzeStability.m. Core/environment/loadEnvironmentPreset.m:24-55 expects missing SLDD assets. Why it matters: students cannot tell which workflow is current, which undermines trust before they reach the physics. Fix: choose one supported workflow, delete dead paths, and update every student-facing entry point.
+
+SIGNIFICANT ISSUES (fix before next competition season):
+1. Aero-data validation is too weak for student-generated data - Support/importAeroData.m:402-444 validates files and sheet presence, not physical plausibility; Support/extractAeroSummary.m:91-95 computes CLalpha as mean slope across the full alpha sweep; wrong-sign Cm_alpha, negative CD, rad/deg mistakes, and bad stall coverage are not robustly trapped. Fix before next season: add physics-based checks and fail fast on sign/unit errors.
+2. The DATCOM path silently degrades to zero or synthetic values - Support/importDatcomData.m:210-213 zeros dynamic derivatives when DAMP is missing; 595-620 zero-fills or forward-fills data slices; 683-689 converts 99999 sentinels to 0; 366-377 can collapse missing elevator data to a no-effect table. Fix before next season: escalate these to hard errors unless the user explicitly authorizes a fallback.
+3. Solver and sampling discipline are weak for RC 6-DOF pilot-in-loop work - Simulation/SimulationDemo.slx -> simulink/configSet0.xml uses ode1be, FixedStep = 0.1, RelTol = 1e-3, SampleTimeConstraint = Unconstrained, StrictBusMsg = ErrorLevel1, UnitsInconsistencyMsg = warning, and AllowAutomaticUnitConversions = on. Fix before next season: retune the solver on actual plant time scales and tighten diagnostics for sample-time and unit consistency.
+4. The claimed SLDD/bus architecture is not self-contained - Core/environment/loadEnvironmentPreset.m expects environmentMaster.sldd and source dictionaries that are not checked in. No BusDefinitions.m or visible Simulink.Bus creation path was found, even though Initialization comments claim bus definitions are loaded. Fix before next season: check in the actual dictionary and bus-generation source, or simplify the architecture until it is reproducible.
+5. CORE protection is procedural, not technical - The repo contains normal .m and .slx files with "do not modify" comments, but no protected models (.slxp), P-coded core assets, or other enforcement. Fix before next season: protect the core model or explicitly remove the claim of protected zones.
+6. Competition realism is only partially represented - Core/mission/missionLibrary.m:1061-1068 models a simplified payload-ratio x laps x multiplier score rather than the official SAE scoring logic; Core/mission/missionSetup.m:92-95 estimates takeoff distance with baseTO_m = 25; Support/scoringEngine.m:72-76 and 93-122 infer takeoff/landing validity from altitude and distance thresholds rather than a runway dynamics model. Fix before next season: align missions and scoring with the actual SAE rule set you intend to teach.
+7. Control-system education is thin - The repo does a decent job with pilot-input calibration, but I found no substantive autopilot, PID/LQR tuning workflow, anti-windup design, or margin-analysis path. Fix before next season: either narrow the scope to pilot-in-loop flight simulation or add explicit control-design exercises and artifacts.
+8. Educational documentation is better than the README, but it still teaches workflow more than physics - Overview.mlx and the setup scripts tell students what to click more clearly than how frames, qbar, sign conventions, stability derivatives, and thrust-line moments map into the model. Fix before next season: add an equation-to-block guide and guided experiments.
+9. Some student-facing assets are stale or malformed - SETUP/setupData_DATCOM.mlx contains a malformed rud.BetaSweep example; Support/plotAeroData.m still indexes as if current data were 3-D; setupData_DATCOM.mlx references datcom_template.inp, which was not found in the repo. Fix before next season: scrub every live-script example and every plotting utility against the current data schema.
+10. Version compatibility is not broad - Overview.mlx says MATLAB R2025a or later, the checked-in models/cache metadata are R2025a era, and I found user/tool-install-specific absolute paths in Calibration/Controller_Output.slx and Simulation/SimulationDemo.slx. Fix before next season: explicitly scope release support to R2025a+ or back-port and test the project.
+
+EDUCATIONAL QUALITY SCORE: 5/10
+PHYSICAL MODEL ACCURACY SCORE: 4/10
+SIMULINK ARCHITECTURE SCORE: 4/10
+
+TOP 3 "CONFIDENT BUT WRONG ANSWER" RISKS:
+1. A team validates crosswind or gust performance with a plant that computes qbar from inertial speed instead of air-relative speed, so every wind-on aero load and control-authority conclusion is biased.
+2. A team imports aero data with a sign/unit error or missing DATCOM derivatives, and the pipeline accepts it because the current validators and parser fall back to averages, zeros, or silent defaults.
+3. A team believes Denver, Lakeland, or Van Nuys results and takeoff/climb margins because the environment presets are not faithfully wired and the propulsion path contains undocumented thrust scaling.
+
+WHAT THIS FRAMEWORK DOES WELL:
+- It uses EOM6DOFBodyQuat instead of a fragile hand-rolled 6-DOF integrator.
+- The intended separation of geometry, mass/inertia, aero data, propulsion data, and environment presets is structurally sound.
+- The live scripts are more accessible than a code-only repo and do a reasonable job of onboarding students to the workflow.
+- The dual manual-data/DATCOM concept is a good educational choice.
+- The environment narratives are thoughtfully written and can teach why density altitude and wind matter, once the wiring is fixed.
+- validateDesign.m does at least handle rule limits with sensible strictness at the boundary (for example, it uses > rather than >= for hard caps).
+
+RECOMMENDED CHANGES (prioritized, max 10):
+1. [P0 - Critical] Fix the qbar/airspeed inconsistency so all aero forces, moments, and control effectiveness use the same air-relative velocity definition.
+2. [P0 - Critical] Remove hardcoded environment block parameters and wire the selected preset through atmosphere, site initialization, turbulence, and gust logic.
+3. [P0 - Critical] Fix rudder calibration to use rudder limits, and revalidate all control-axis scaling with a deterministic calibration test model.
+4. [P0 - Critical] Audit the propulsion model against measured thrust data, remove the unexplained Gain = 2, and document exactly what density correction, if any, is physically justified.
+5. [P0 - Critical] Collapse the repo to one supported student workflow (Overview.mlx -> setup script -> SimulationDemo.slx) and delete or rewrite every stale reference to missing models/scripts/assets.
+6. [P1 - High] Add a real aero-data validator that checks sign conventions, unit plausibility, stall capture, table coverage, and derivative sanity before simulation can run.
+7. [P1 - High] Make DATCOM fallbacks explicit and opt in; missing DAMP/control cards should stop the workflow unless the user intentionally provides substitute derivatives.
+8. [P1 - High] Check in the real SLDD and bus-definition sources, or replace them with one visible initialization script that students can inspect and trust.
+9. [P1 - High] Replace heuristic mission/takeoff/scoring logic with rule-aligned mission definitions and ground-operation checks that are either simulated or very clearly labeled as approximations.
+10. [P2 - Medium] Add an instructor-grade equation-to-block guide with 3-5 guided exercises that force students to change CG, AR, density altitude, and stability derivatives and explain the resulting behavior.
+
+ONE THING THAT WOULD MOST IMPROVE THIS FRAMEWORK'S EDUCATIONAL VALUE:
+Add a short "from equations to blocks" learning path that explicitly traces one complete force-and-moment calculation from geometry/aero tables through alpha, beta, qbar, coefficient lookup, body-force/moment assembly, and the 6-DOF quaternion EOM, then pairs that with guided experiments on CG, wing loading, density altitude, and sign-convention mistakes. Right now the framework is strongest as a workflow runner. It becomes a real teaching tool only when students can connect each plotted behavior back to a physical cause and a specific model element.
+
+Appendix A - Section-by-section audit
+
+Section 1 - Physical model correctness
+- Good: The plant uses EOM6DOFBodyQuat in Simulation/SimulationDemo.slx, which is the right starting point for an educational 6-DOF model.
+- Good: The example setup provides a full 3x3 inertia matrix instead of forcing a diagonal inertia assumption.
+- Major issue: In system_1153.xml, dynamic pressure uses <Ve> while alpha, beta, and TAS are computed from Vb = body velocity - uvw_wind. This breaks coordinate/airspeed consistency whenever wind is nonzero.
+- Major issue: Initialization.m zeros latitude, longitude, and altitude despite comments describing venue-based initialization.
+- Major issue: The active COESA block in system_1209.xml is hard-set to a specific high-temperature profile rather than a selected environment preset.
+- Major issue: The propulsion model in system_1168.xml uses a lookup, multiplies by rho/1.225, and then multiplies again by Gain = 2. That is too opaque for a student tool.
+- Risk: importDatcomData.m will zero dynamic derivatives if no DAMP card is present. That is not wrong as a placeholder, but it is too dangerous as a silent teaching default.
+- Risk: Solver fidelity is weak for fast pilot-in-loop dynamics (ode1be, fixed step 0.1 s).
+- Not confirmed from static inspection: actual algebraic loops during compilation. The model diagnostic is set to warning, but I could not compile the model in this environment.
+
+Section 2 - Aerodynamic data pipeline integrity
+- Good: importAeroData.m cleanly separates elevator/aileron as deflection x alpha tables and rudder as deflection x beta tables.
+- Major issue: importAeroData.m validation only checks file type and sheet presence. It does not reject negative drag, impossible lift-curve slope, wrong-sign Cm_alpha, or rad/deg mistakes.
+- Major issue: extractAeroSummary.m computes CLalpha_perDeg as the mean slope across the entire alpha range, which can blur the linear region with post-stall behavior.
+- Major issue: importDatcomData.m zero-fills missing fields, forward-fills NaNs, replaces 99999 with 0, and can synthesize or flatten control-effectiveness tables. That is too permissive for student use.
+- Major issue: setupData_DATCOM.mlx contains a malformed rudder beta-sweep example.
+- Gap: I did not find explicit out-of-range protection around the aero lookup tables in the checked-in model XML. The out-of-range policy appears to rely on lookup block defaults rather than an explicit educational choice.
+- Gap: I did not find a dedicated validateAeroData.m or an equivalent fail-fast physics validator.
+
+Section 3 - Simulation architecture
+- Good: The intended three-zone architecture is pedagogically sensible.
+- Major issue: CORE is not technically protected. The repo contains normal .m and .slx files with "do not modify" comments, but no protected model or P-coded delivery.
+- Major issue: RC_Demo.prj is an empty stub while the actual project metadata lives under resources/project.
+- Major issue: loadEnvironmentPreset.m expects environmentMaster.sldd and source dictionaries that are not in the repo.
+- Major issue: I did not find BusDefinitions.m or a visible bus-generation script, even though Initialization comments claim bus definitions are loaded.
+- Major issue: The initialization and mission scripts still reference obsolete entry points (SimulationChallenge.slx, initialSetup1.m, runFullSetup).
+- Gap: No custom environment option was found; the architecture is fixed to presets 1-8.
+- Risk: Model callbacks and mask initialization perform significant hidden work, which reduces teachability.
+
+Section 4 - Control system design
+- Good: The repo does provide a pilot-input calibration workflow and mask-based loading path.
+- Major issue: There is a direct rudder scaling bug in system_2006.xml where rudder deflection uses elevator limits.
+- Major issue: Calibrated_Controller.m relies on evalin, assignin, UI file dialogs, and broad catch blocks that silently fall back to defaults.
+- Gap: I did not find a substantive autopilot/control-law design path, anti-windup implementation, or margin-analysis workflow.
+- Conclusion: This teaches device calibration and pilot-in-loop actuation, not control-system design in the model-based-design sense.
+
+Section 5 - Educational scaffolding quality
+- Good: Overview.mlx is readable and clearly introduces the intended workflow.
+- Good: The setup live scripts annotate many student-facing parameters with units and short explanations.
+- Major issue: The live scripts teach the sequence of steps more clearly than the underlying physics.
+- Major issue: I did not find guided exercises that force students to investigate CG movement, AR changes, density altitude, or stability-derivative sensitivity.
+- Major issue: Error handling is often computational rather than pedagogical; students are not consistently told what went wrong physically.
+- Gap: There is no clear equation-to-block map tying the Simulink blocks back to aerospace fundamentals.
+- Gap: The repo partially anticipates common student mistakes via validateDesign.m, but it does not robustly catch wrong-sign Cm_alpha, neutral-point mistakes, or bad DATCOM/control-derivative coverage.
+
+Section 6 - MATLAB/Simulink code quality
+- Good: Naming is often physically meaningful in the student-facing setup scripts (geometry.Area, initial.Inertia, CLalpha_perDeg, etc.).
+- Good: validateDesign.m handles hard-rule boundaries sensibly by using > comparisons rather than rejecting values exactly on the limit.
+- Major issue: There are still many magic numbers and broad assumptions (baseTO_m = 25, hardcoded turbulence probability text, Gain = 2, fixed high-temperature atmosphere settings).
+- Major issue: The DATCOM parser is robust to malformed inputs in the sense that it will keep running, but that robustness comes at the cost of silently wrong aero data.
+- Major issue: There are stale utilities (plotAeroData.m) and stale references in comments and scripts.
+- Major issue: I found at least one absolute user-specific path in Calibration/Controller_Output.slx, plus tool-install-specific visualization paths in Simulation/SimulationDemo.slx.
+- Major issue: The repo is clearly R2025a oriented. It should not claim broad compatibility down to R2022b without testing.
+
+Section 7 - Competition realism
+- Good: The environment-library narratives are thoughtful and point students toward real venue effects like density altitude and gusts.
+- Major issue: The missions are mostly internal challenge missions, not a faithful representation of the official SAE Regular, Advanced, or Micro class mission structure.
+- Major issue: The scoring formula is simplified to payload ratio x laps x multiplier and is inconsistent across files.
+- Major issue: Ground roll and landing validity are inferred from altitude/distance thresholds in post-processing, not enforced by a dedicated runway/gear/contact model.
+- Major issue: missionSetup.m estimates takeoff distance with a one-line density scaling heuristic, not a physics-based takeoff model.
+- Gap: I did not find payload CG-shift modeling for cargo loading/unloading or payload-drop effects.
+- Gap: Failure modes are described in mission text, but the underlying plant and scoring do not consistently simulate the mechanisms that would create those failures.
+
+Section 8 - Risks if this ships to students as-is
+- The highest-likelihood failure mode is not "the model crashes". It is that the model runs, looks polished, and teaches the wrong causal story.
+- The most dangerous combination is wind-on simulation plus the qbar bug plus permissive aero-data import. That is exactly how a team walks into a flight line overconfident.
+- The second danger is competition-site theater: the repo tells students they are testing Lakeland, Van Nuys, or Denver, while the active model is not faithfully honoring those conditions.
+- The third danger is optimism bias from propulsion and takeoff approximations. A student can believe the aircraft has margin when the real airplane does not.
+
+Evidence pointers
+- Overview and workflow: Overview.mlx, SETUP/setupData_Excel_Template.mlx, SETUP/setupData_DATCOM.mlx
+- Active model callback and solver: Simulation/SimulationDemo.slx -> simulink/blockdiagram.xml, simulink/configSet0.xml
+- Flight-parameter inconsistency: Simulation/SimulationDemo.slx -> simulink/systems/system_1153.xml
+- Propulsion scaling: Simulation/SimulationDemo.slx -> simulink/systems/system_1168.xml
+- Environment hardcoding: Simulation/SimulationDemo.slx -> simulink/systems/system_1209.xml, simulink/systems/system_1228.xml
+- Rudder calibration bug: Simulation/SimulationDemo.slx -> simulink/systems/system_2006.xml
+- Environment libraries and missing SLDD path: Core/environment/environmentLibrary.m, Core/environment/loadEnvironmentPreset.m
+- Stale initialization and mission references: Core/initialization/Initialization.m, Core/mission/missionSetup.m, Core/validation/validateDesign.m
+- Aero import/summary issues: Support/importAeroData.m, Support/importDatcomData.m, Support/extractAeroSummary.m, Support/plotAeroData.m
+- Scoring mismatch: Support/scoringEngine.m, Core/mission/missionLibrary.m
+- Calibration code quality: Support/Calibrated_Controller.m, Support/CalibrateInputMask.m
+
+This review was performed after first reading Overview.mlx.
+MATLAB/Simulink MCP calls were attempted but failed to attach to a MATLAB session, so the findings above come from static inspection of the repository source, MLX, and SLX contents.
