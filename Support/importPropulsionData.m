@@ -69,13 +69,11 @@ function propulsionData = importPropulsionData(filename, sheetName, propulsionDa
     % ---- Validate inputs ------------------------------------------------
     validateInputs(filename, sheetName, propulsionData);
 
-    % ---- Read Excel — skip 4 metadata rows, use row 5 as header ---------
-    opts = detectImportOptions(filename, 'Sheet', sheetName);
-    opts.VariableNamesRange = 'A5';       % row 5 holds short MATLAB-friendly names
-    opts.DataRange          = 'A6';       % numeric data starts at row 6
-    opts.VariableNamingRule = 'preserve'; % keep names exactly as written in Excel
-
-    rawData = readtable(filename, opts);
+    % ---- Read Excel -----------------------------------------------------
+    % The original template stores short MATLAB-friendly names on row 5, but
+    % exported motor data often has a compact table with headers higher in the
+    % sheet. Detect the header row instead of hardcoding one layout.
+    rawData = readPropulsionTable(filename, sheetName);
 
     % ---- Remove invalid rows --------------------------------------------
     % Two types of invalid rows can appear in the Excel template:
@@ -132,6 +130,95 @@ function propulsionData = importPropulsionData(filename, sheetName, propulsionDa
     fprintf('importPropulsionData: loaded "%s" — breakpoint: %s (%d points), outputs: %s\n', ...
         sheetName, breakpointName, length(propulsionData.(breakpointName)), ...
         strjoin(outputNames, ', '));
+end
+
+
+% =========================================================================
+function rawData = readPropulsionTable(filename, sheetName)
+% Read a propulsion table by detecting the header row, then converting
+% mixed Excel numeric/string/cell values to numeric columns.
+    cells = readcell(filename, 'Sheet', sheetName);
+    headerRow = findPropulsionHeaderRow(cells);
+    if isempty(headerRow)
+        error('importPropulsionData:headerMissing', ...
+            'Could not find a propulsion table header row in sheet "%s".', sheetName);
+    end
+
+    header = cells(headerRow, :);
+    lastHeaderCol = find(~cellfun(@isMissingCell, header), 1, 'last');
+    header = header(1:lastHeaderCol);
+    names = matlab.lang.makeUniqueStrings(matlab.lang.makeValidName(string(header)));
+
+    dataCells = cells(headerRow + 1:end, 1:lastHeaderCol);
+    data = NaN(size(dataCells));
+    badMask = false(size(dataCells));
+    for row = 1:size(dataCells, 1)
+        for col = 1:size(dataCells, 2)
+            [data(row, col), badMask(row, col)] = scalarCellToDouble(dataCells{row, col});
+        end
+    end
+
+    if any(badMask(:))
+        warning('importPropulsionData:nonnumericCells', ...
+            'Sheet "%s" contains nonnumeric cells in the propulsion table; those entries were set to NaN.', ...
+            sheetName);
+    end
+
+    rawData = array2table(data, 'VariableNames', cellstr(names));
+end
+
+
+function headerRow = findPropulsionHeaderRow(cells)
+    headerRow = [];
+    for row = 1:size(cells, 1)
+        first = cells{row, 1};
+        if isMissingCell(first) || ~(ischar(first) || isstring(first))
+            continue
+        end
+        firstText = lower(strtrim(string(first)));
+        if contains(firstText, "throttle")
+            nonmissingHeaderCount = 0;
+            for col = 1:size(cells, 2)
+                if ~isMissingCell(cells{row, col})
+                    nonmissingHeaderCount = nonmissingHeaderCount + 1;
+                end
+            end
+            if nonmissingHeaderCount >= 2
+                headerRow = row;
+                return
+            end
+        end
+    end
+end
+
+
+function [value, isBad] = scalarCellToDouble(item)
+    isBad = false;
+    if isMissingCell(item)
+        value = NaN;
+    elseif isnumeric(item) && isscalar(item)
+        value = double(item);
+    elseif ischar(item) || isstring(item)
+        text = strtrim(string(item));
+        value = str2double(text);
+        isBad = isnan(value) && strlength(text) > 0;
+    else
+        value = NaN;
+        isBad = true;
+    end
+end
+
+
+function tf = isMissingCell(item)
+    tf = isempty(item);
+    if tf
+        return
+    end
+    try
+        tf = any(ismissing(item), 'all');
+    catch
+        tf = false;
+    end
 end
 
 
