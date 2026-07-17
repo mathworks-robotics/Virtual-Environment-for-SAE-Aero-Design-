@@ -28,7 +28,8 @@ classdef Calibrated_Controller
                 end
 
                 % Case 3: File path stored — try auto-loading from disk
-                if ~isfile(configFileName)
+                configLoadPath = Calibrated_Controller.resolveConfigPath(configFileName);
+                if ~isfile(configLoadPath)
                     warning('CalibratedInput:fileNotFound', ...
                         'CalibratedInput: Config file "%s" not found. Using defaults.', ...
                         configFileName);
@@ -38,7 +39,7 @@ classdef Calibrated_Controller
                 end
 
                 try
-                    loaded = load(configFileName);
+                    loaded = load(configLoadPath);
                 catch
                     warning('CalibratedInput:readError', ...
                         'CalibratedInput: Could not read "%s". Using defaults.', ...
@@ -165,8 +166,9 @@ classdef Calibrated_Controller
                 return;
             end
 
-            % Store full path and push to workspace
-            maskObj.getParameter('configName').Value = fullPath;
+            % Store project-relative paths for in-repo configs.
+            maskObj.getParameter('configName').Value = ...
+                Calibrated_Controller.toProjectRelativePath(fullPath);
             assignin('base', 'pilotCfgActive', cfg);
 
             % ✅ Use shared helper — consistent with rest of class
@@ -267,6 +269,63 @@ classdef Calibrated_Controller
             mws.set('aileronMax',    15);
             mws.set('elevatorMin',   -25);
             mws.set('elevatorMax',   25);
+        end
+
+
+        function resolvedPath = resolveConfigPath(configFileName)
+            resolvedPath = configFileName;
+
+            if Calibrated_Controller.isAbsolutePath(configFileName)
+                return;
+            end
+
+            try
+                proj = currentProject;
+                projectPath = fullfile(proj.RootFolder, configFileName);
+                if isfile(projectPath)
+                    resolvedPath = projectPath;
+                    return;
+                end
+            catch
+            end
+
+            workingPath = fullfile(pwd, configFileName);
+            if isfile(workingPath)
+                resolvedPath = workingPath;
+            end
+        end
+
+
+        function relativePath = toProjectRelativePath(fullPath)
+            relativePath = fullPath;
+
+            try
+                proj = currentProject;
+                rootFolder = strrep(char(proj.RootFolder), '/', filesep);
+                pathValue = strrep(char(fullPath), '/', filesep);
+
+                if ~endsWith(rootFolder, filesep)
+                    rootFolder = [rootFolder filesep];
+                end
+
+                if startsWith(pathValue, rootFolder, 'IgnoreCase', ispc)
+                    relativePath = extractAfter(pathValue, strlength(rootFolder));
+                    relativePath = strrep(char(relativePath), filesep, '/');
+                end
+            catch
+            end
+        end
+
+
+        function isAbsolute = isAbsolutePath(pathValue)
+            pathValue = char(pathValue);
+            isAbsolute = startsWith(pathValue, filesep);
+
+            if ispc
+                isAbsolute = isAbsolute || ...
+                    ~isempty(regexp(pathValue, '^[A-Za-z]:[\\/]', 'once')) || ...
+                    startsWith(pathValue, '\\');
+            end
         end
 
     end
