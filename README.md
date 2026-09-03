@@ -78,14 +78,6 @@ Both environment choices feed the same gravity, atmosphere, temperature-adjusted
 
 Run the model from Simulink and fly with the calibrated input device. Results are written to the `out` variable in the MATLAB workspace and are available in Simulation Data Inspector for comparison and analysis.
 
-## Environment Data Maintenance
-
-The shipped dictionary is ready to use. Developers changing the preset catalog in `Core/environment/Developer/environmentLibrary.m` can rebuild it with:
-
-```matlab
-createEnvironmentDataDictionary
-```
-
 ## Requirements
 
 - MATLAB R2025b or later
