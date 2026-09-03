@@ -1,0 +1,7 @@
+work/
+slprj/
+*.slxc
+*.mex*
+codegen/
+*.autosave
+
